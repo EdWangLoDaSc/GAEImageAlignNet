@@ -267,17 +267,17 @@ class GraphAutoencoder(torch.nn.Module):
         self.latent_space = latent_space
         
         # Encoder layers
-        self.encoder_conv1 = GATConv(self.in_features, 16)
-        self.encoder_conv2 = GATConv(16, 32)
-        self.encoder_conv3 = GATConv(32, self.latent_space)  # Using latent_space as the final encoder output size
+        self.encoder_conv1 = GATConv(self.in_features, 32)
+        self.encoder_conv2 = GATConv(32, 64)
+        self.encoder_conv3 = GATConv(64, self.latent_space)  # Using latent_space as the final encoder output size
         
         # Fully connected layer to expand the latent space back to node space
         self.fc_expand = Linear(self.latent_space, 81 * self.in_features)  # Expand from latent space
         
         # Decoder layers
-        self.decoder_conv1 = GATConv(self.in_features, 32)  # Reverse order
-        self.decoder_conv2 = GATConv(32, 16)  # Symmetric to encoder
-        self.decoder_conv3 = GATConv(16, self.in_features)  # Output should match the input feature size
+        self.decoder_conv1 = GATConv(self.in_features, 64)  # Reverse order
+        self.decoder_conv2 = GATConv(64, 32)  # Symmetric to encoder
+        self.decoder_conv3 = GATConv(32, self.in_features)  # Output should match the input feature size
 
     def forward(self, x, edge_index, batch):
         # Encoder pass
@@ -418,7 +418,7 @@ def train(model, data_loader):
         feature_loss = mse_loss(x_reconstructed, data.x)
         image_loss = mse_loss(image_reconstructed, data.image)  # Assuming data.image is the target image
         
-        loss = 2*feature_loss + image_loss
+        loss = feature_loss + image_loss
         loss.backward()
         optimizer.step()
         
