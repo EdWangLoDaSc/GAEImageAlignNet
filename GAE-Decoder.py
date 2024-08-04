@@ -163,7 +163,7 @@ def simulate_and_stack(sim_params):
     true_state_vect = np.vstack(true_state_vect)
     return true_state_vect
 
-true_state_vect = simulate_and_stack(sim_params)
+#true_state_vect = simulate_and_stack(sim_params)
 #plt.imshow(true_state_vect[100,:,:,0])
 #plt.savefig('x.png')
 import torch
@@ -341,9 +341,9 @@ def generate_graph_data(true_state_vect, radius=13, virtual_node_count=256):
     return graphs
 
 
-graph_data_list = generate_graph_data(true_state_vect)
+#graph_data_list = generate_graph_data(true_state_vect)
 
-torch.save(graph_data_list, '/data/nas/hanyang/test_sw/graph_data_exp_1028.pt')
+#torch.save(graph_data_list, '/data/nas/hanyang/test_sw/graph_data_exp_1028.pt')
 graph_data_list = torch.load('/data/nas/hanyang/test_sw/graph_data_exp_1028.pt')
 import torch
 from torch import nn
@@ -379,8 +379,8 @@ class GraphAutoencoder(torch.nn.Module):
         self.latent_space = latent_space
         
         # Encoder layers
-        self.encoder_conv1 = GATConv(self.in_features, 32)
-        self.encoder_conv2 = GATConv(32, 64)
+        self.encoder_conv1 = GATConv(self.in_features, 32,head=2)
+        self.encoder_conv2 = GATConv(32, 64,head=2)
         self.encoder_conv3 = GATConv(64, self.latent_space)  # Using latent_space as the final encoder output size
         
         # Fully connected layer to expand the latent space back to node space
@@ -388,8 +388,8 @@ class GraphAutoencoder(torch.nn.Module):
         
         # Decoder layers
         self.decoder_conv1 = GATConv(self.in_features, 64)  # Reverse order
-        self.decoder_conv2 = GATConv(64, 32)  # Symmetric to encoder
-        self.decoder_conv3 = GATConv(32, self.in_features)  # Output should match the input feature size
+        self.decoder_conv2 = GATConv(64, 32,head=2)  # Symmetric to encoder
+        self.decoder_conv3 = GATConv(32, self.in_features,head=2)  # Output should match the input feature size
 
     def forward(self, x, edge_index, batch):
         # Encoder pass
@@ -409,7 +409,44 @@ class GraphAutoencoder(torch.nn.Module):
         x_reconstructed = custom_activation_graph(x_reconstructed)
         
         return x_reconstructed, x_global.view(-1, self.latent_space)
-                
+class GraphAutoencoder(torch.nn.Module):
+    def __init__(self, in_features=3, latent_space=32):
+        super().__init__()
+        self.in_features = in_features
+        self.latent_space = latent_space
+        self.heads = 2
+        
+        # Encoder layers
+        self.encoder_conv1 = GATConv(self.in_features, 32, heads=self.heads)
+        self.encoder_conv2 = GATConv(32 * self.heads, 64, heads=self.heads)
+        self.encoder_conv3 = GATConv(64 * self.heads, self.latent_space, heads=self.heads, concat=False)  # Using latent_space as the final encoder output size
+        
+        # Fully connected layer to expand the latent space back to node space
+        self.fc_expand = Linear(self.latent_space, num_nodes * self.in_features)  # Expand from latent space
+        
+        # Decoder layers
+        self.decoder_conv1 = GATConv(self.in_features, 64, heads=self.heads)
+        self.decoder_conv2 = GATConv(64 * self.heads, 32, heads=self.heads)
+        self.decoder_conv3 = GATConv(32 * self.heads, self.in_features, heads=self.heads, concat=False)
+
+    def forward(self, x, edge_index, batch):
+        # Encoder pass
+        x1 = F.relu(self.encoder_conv1(x, edge_index))
+        x2 = F.relu(self.encoder_conv2(x1, edge_index))
+        x3 = F.relu(self.encoder_conv3(x2, edge_index))  # Final encoding to latent space
+        x_global = global_mean_pool(x3, batch)
+        
+        # Feature expansion
+        x_expanded = self.fc_expand(x_global)
+        x_expanded = x_expanded.view(-1, self.in_features)  # Reshape back to match input feature dimension
+        
+        # Decoder pass
+        x_reconstructed = F.relu(self.decoder_conv1(x_expanded, edge_index))
+        x_reconstructed = F.relu(self.decoder_conv2(x_reconstructed, edge_index))
+        x_reconstructed = self.decoder_conv3(x_reconstructed, edge_index)
+        x_reconstructed = custom_activation_graph(x_reconstructed)
+        
+        return x_reconstructed, x_global.view(-1, self.latent_space)            
 
 # Example usage
 model = GraphAutoencoder(in_features=3, latent_space=64)
@@ -679,7 +716,6 @@ def test(model, data_loader, device):
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
-# 假设 model 和 train_loader, test_loader 已经定义
 scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=20, verbose=True)
 
 
