@@ -163,7 +163,7 @@ def simulate_and_stack(sim_params):
     true_state_vect = np.vstack(true_state_vect)
     return true_state_vect
 
-#true_state_vect = simulate_and_stack(sim_params)
+true_state_vect = simulate_and_stack(sim_params)
 #plt.imshow(true_state_vect[100,:,:,0])
 #plt.savefig('x.png')
 import torch
@@ -211,11 +211,140 @@ def generate_graph_data(true_state_vect, radius=13):
         graphs.append(Data(x=node_features, edge_index=edge_index, batch=batch, image=image))
     
     return graphs
-#graph_data_list = generate_graph_data(true_state_vect)
 
 
-#torch.save(graph_data_list, '/data/nas/hanyang/test_sw/graph_data.pt')
-graph_data_list = torch.load('/data/nas/hanyang/test_sw/graph_data.pt')
+import random
+import numpy as np
+import networkx as nx
+import torch
+from torch_geometric.data import Data
+
+import random
+import numpy as np
+import networkx as nx
+import torch
+from torch_geometric.data import Data
+
+def generate_graph_data(true_state_vect, radius=13, virtual_node_count=1028):
+    graphs = []
+    for state in true_state_vect:
+        # Define the indices for sensor placement and apply random movement
+        base_indices = [(i, j) for i in range(0, 63, 7) for j in range(0, 63, 7)]
+        moves = [(0, 2), (0, -2), (2, 0), (-2, 0)]
+        selected_indices = []
+
+        for (i, j) in base_indices:
+            move = random.choice(moves)
+            new_i, new_j = i + move[0], j + move[1]
+            selected_indices.append((max(0, min(new_i, 63)), max(0, min(new_j, 63))))
+
+        # Extract features for selected sensor locations
+        features = np.array([state[i, j, :] for (i, j) in selected_indices])
+
+        # Create the graph with nodes and edges
+        G = nx.Graph()
+        node_count = 0
+        real_nodes_indices = list(range(len(selected_indices)))
+        for idx, ((i, j), feature) in enumerate(zip(selected_indices, features)):
+            G.add_node(node_count, pos=(i, j), color=feature)
+            node_count += 1
+
+        virtual_node_features = []
+        virtual_edges_added = 0
+        for i in real_nodes_indices:
+            for j in real_nodes_indices:
+                if i < j and np.linalg.norm(np.array(selected_indices[i]) - np.array(selected_indices[j])) <= radius:
+                    if virtual_edges_added < virtual_node_count:
+                        mean_feature = (features[i] + features[j]) / 2
+                        G.add_node(node_count, pos=(-1, -1), color=mean_feature)  # Virtual node
+                        G.add_edge(i, node_count)
+                        G.add_edge(node_count, j)
+                        virtual_node_features.append(mean_feature)
+                        node_count += 1
+                        virtual_edges_added += 1
+                    if virtual_edges_added >= virtual_node_count:
+                        break
+            if virtual_edges_added >= virtual_node_count:
+                break
+
+        # Combine real and virtual node features
+        all_features = np.vstack([features, np.array(virtual_node_features)])
+
+        node_features = torch.tensor(all_features, dtype=torch.float)
+        edge_list = list(G.edges())
+        edge_index = torch.tensor(np.array(edge_list).T, dtype=torch.long)
+        batch = torch.zeros(node_count, dtype=torch.long)
+        
+        # Assuming 'image' is a part of the state or can be derived from it
+        image = torch.tensor(state, dtype=torch.float)  # Adjust this line as necessary
+        
+        graphs.append(Data(x=node_features, edge_index=edge_index, batch=batch, image=image))
+        print(f"Graph generated with {node_count} nodes.")
+
+    return graphs
+
+
+def generate_graph_data(true_state_vect, radius=13, virtual_node_count=256):
+    graphs = []
+    for state in true_state_vect:
+        # Define the indices for sensor placement and apply random movement
+        base_indices = [(i, j) for i in range(0, 63, 7) for j in range(0, 63, 7)]
+        moves = [(0, 2), (0, -2), (2, 0), (-2, 0)]
+        selected_indices = []
+
+        for (i, j) in base_indices:
+            move = random.choice(moves)
+            new_i, new_j = i + move[0], j + move[1]
+            selected_indices.append((max(0, min(new_i, 63)), max(0, min(new_j, 63))))
+
+        # Extract features for selected sensor locations
+        features = np.array([state[i, j, :] for (i, j) in selected_indices])
+
+        G = nx.Graph()
+        node_count = 0
+        real_nodes_indices = list(range(len(selected_indices)))
+        for idx, ((i, j), feature) in enumerate(zip(selected_indices, features)):
+            G.add_node(node_count, pos=(i, j), color=feature)
+            node_count += 1
+
+        virtual_node_features = []
+        virtual_edges_added = 0
+        for i in real_nodes_indices:
+            for j in real_nodes_indices:
+                if i < j and np.linalg.norm(np.array(selected_indices[i]) - np.array(selected_indices[j])) <= radius:
+                    if virtual_edges_added < virtual_node_count:
+                        mean_feature = (features[i] + features[j]) / 2
+                        G.add_node(node_count, pos=(-1, -1), color=mean_feature)  # Virtual node
+                        G.add_edge(i, node_count)
+                        G.add_edge(node_count, j)
+                        virtual_node_features.append(mean_feature)
+                        node_count += 1
+                        virtual_edges_added += 1
+                    if virtual_edges_added >= virtual_node_count:
+                        break
+            if virtual_edges_added >= virtual_node_count:
+                break
+
+        # Combine real and virtual node features
+        all_features = np.vstack([features, np.array(virtual_node_features)])
+
+        node_features = torch.tensor(all_features, dtype=torch.float)
+        edge_list = list(G.edges())
+        edge_index = torch.tensor(np.array(edge_list).T, dtype=torch.long)
+        batch = torch.zeros(node_count, dtype=torch.long)
+        
+        image = torch.tensor(state, dtype=torch.float)
+        
+        graphs.append(Data(x=node_features, edge_index=edge_index, batch=batch, image=image))
+        print(f"Graph generated with {node_count} nodes.")
+
+    return graphs
+
+
+graph_data_list = generate_graph_data(true_state_vect)
+
+torch.save(graph_data_list, '/data/nas/hanyang/test_sw/graph_data_exp_1028.pt')
+graph_data_list = torch.load('/data/nas/hanyang/test_sw/graph_data_exp_1028.pt')
 import torch
 from torch import nn
 
@@ -231,24 +360,6 @@ def custom_activation_image(x):
     scaled_feature_3 = F.relu(x[:,2:, :,:])
     return torch.cat([tanh_activation, scaled_feature_3], dim=1)
 
-'''class GraphAutoencoder(torch.nn.Module):
-    def __init__(self, in_features):
-        super().__init__()
-        self.encoder_conv1 = GATConv(in_features, 16)
-        self.encoder_conv2 = GATConv(16, 32)
-        self.decoder_conv1 = GATConv(32, 16)
-        self.decoder_conv2 = GATConv(16, in_features)
-
-    def forward(self, x, edge_index, batch):
-        x1 = F.relu(self.encoder_conv1(x, edge_index))
-        x2 = F.relu(self.encoder_conv2(x1, edge_index))
-        x_global = global_mean_pool(x2, batch)
-        x_reconstructed = F.relu(self.decoder_conv1(x2, edge_index))
-        x_reconstructed = self.decoder_conv2(x_reconstructed, edge_index)
-        x_reconstructed = custom_activation_graph(x_reconstructed)  # Apply custom activation
-        return x_reconstructed, x_global.view(-1, 32)
-'''
-
 import torch
 import torch.nn.functional as F
 from torch_geometric.nn import GATConv, global_mean_pool
@@ -259,6 +370,7 @@ import torch.nn.functional as F
 from torch.nn import Linear
 from torch_geometric.nn import GATConv, global_mean_pool,global_add_pool
 
+num_nodes = 256+81
 
 class GraphAutoencoder(torch.nn.Module):
     def __init__(self, in_features=3, latent_space=32):
@@ -272,7 +384,7 @@ class GraphAutoencoder(torch.nn.Module):
         self.encoder_conv3 = GATConv(64, self.latent_space)  # Using latent_space as the final encoder output size
         
         # Fully connected layer to expand the latent space back to node space
-        self.fc_expand = Linear(self.latent_space, 81 * self.in_features)  # Expand from latent space
+        self.fc_expand = Linear(self.latent_space, num_nodes * self.in_features)  # Expand from latent space
         
         # Decoder layers
         self.decoder_conv1 = GATConv(self.in_features, 64)  # Reverse order
@@ -297,13 +409,12 @@ class GraphAutoencoder(torch.nn.Module):
         x_reconstructed = custom_activation_graph(x_reconstructed)
         
         return x_reconstructed, x_global.view(-1, self.latent_space)
-                  
+                
 
 # Example usage
 model = GraphAutoencoder(in_features=3, latent_space=64)
 
 # Example usage
-num_nodes = 81
 
 '''class CompleteModel(torch.nn.Module):
     def __init__(self, in_features):
@@ -405,7 +516,7 @@ test_dataset = graph_data_list[train_size:]
 # 创建 DataLoader
 train_loader = DataLoader(train_dataset, batch_size=10, shuffle=True)
 test_loader = DataLoader(test_dataset, batch_size=10, shuffle=False)
-
+'''
 def train(model, data_loader):
     model.train()
     total_loss = 0
@@ -418,7 +529,7 @@ def train(model, data_loader):
         feature_loss = mse_loss(x_reconstructed, data.x)
         image_loss = mse_loss(image_reconstructed, data.image)  # Assuming data.image is the target image
         
-        loss = feature_loss + image_loss
+        loss = 2*feature_loss + image_loss
         loss.backward()
         optimizer.step()
         
@@ -428,14 +539,57 @@ def train(model, data_loader):
     print(f"Train function returning: {average_loss}")  # Check what is being returned
     return average_loss
 
+'''
 import torch
-import torch.nn.functional as F
-from torchmetrics.image import PeakSignalNoiseRatio
+
+def train(model, data_loader, device, task_weights=(1, 2)):
+    model.train()
+    total_loss = 0
+    total_feature_loss = 0
+
+    total_image_loss = 0
+
+    for data in data_loader:
+        data = data.to(device)
+        optimizer.zero_grad()
+        x_reconstructed, image_reconstructed = model(data)
+
+        # Reshape target image to match output shape
+        target_shape = image_reconstructed.shape
+        data.image = data.image.view(target_shape)
+
+        # Calculate losses for each task
+        feature_loss = mse_loss(x_reconstructed, data.x)
+        image_loss = mse_loss(image_reconstructed, data.image)
+
+        # Weighted sum of losses for multi-task learning
+        total_task_loss = task_weights[0] * feature_loss + task_weights[1] * image_loss
+        total_task_loss.backward()
+        optimizer.step()
+
+        total_loss += total_task_loss.item()
+        total_feature_loss += feature_loss.item()
+        total_image_loss += image_loss.item()
+
+    # Calculate average losses
+    average_loss = total_loss / len(data_loader)
+    average_feature_loss = total_feature_loss / len(data_loader)
+    average_image_loss = total_image_loss / len(data_loader)
+
+    print(f"Total Average Loss: {average_loss}")
+    print(f"Feature Reconstruction Loss: {average_feature_loss}")
+    print(f"Image Reconstruction Loss: {average_image_loss}")
+
+    return average_loss, average_feature_loss, average_image_loss
 
 import torch
 import torch.nn.functional as F
 from torchmetrics.image import PeakSignalNoiseRatio
 
+import torch
+import torch.nn.functional as F
+from torchmetrics.image import PeakSignalNoiseRatio
+'''
 def test(model, data_loader, device):
     model.eval()
     model.to(device)
@@ -474,18 +628,73 @@ def test(model, data_loader, device):
     
     return average_loss, average_psnr
 
+'''
+def test(model, data_loader, device):
+    model.eval()
+    model.to(device)
+    total_loss = 0
+    total_psnr = 0
+    total_feature_loss = 0
+    total_image_loss = 0
+
+    # Define PSNR metric with data range dynamically computed
+    psnr_metric = PeakSignalNoiseRatio().to(device)
+
+    with torch.no_grad():
+        for data in data_loader:
+            data = data.to(device)
+            x_reconstructed, image_reconstructed = model(data)
+
+            # Calculate feature loss
+            feature_loss = F.mse_loss(x_reconstructed, data.x)
+
+            # Ensure target image is reshaped correctly
+            target_shape = image_reconstructed.shape
+            data.image = data.image.view(target_shape).to(device)
+            
+            # Calculate image loss
+            image_loss = F.mse_loss(image_reconstructed, data.image)
+
+            # Calculate PSNR for the reconstructed image
+            image_psnr = psnr_metric(image_reconstructed, data.image)
+            total_psnr += image_psnr.item()
+
+            # Combine feature loss and image loss
+            total_loss += (feature_loss + image_loss).item()
+            total_feature_loss += feature_loss.item()
+            total_image_loss += image_loss.item()
+
+    # Compute average loss and PSNR over all batches
+    average_loss = total_loss / len(data_loader)
+    average_feature_loss = total_feature_loss / len(data_loader)
+    average_image_loss = total_image_loss / len(data_loader)
+    average_psnr = total_psnr / len(data_loader)
+
+    print(f"Test Results: Average Loss = {average_loss}, Feature Loss = {average_feature_loss}, Image Loss = {average_image_loss}, Average PSNR = {average_psnr}")
+    
+    return average_loss, average_feature_loss, average_image_loss, average_psnr
+
+
 # Usage
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+
+# 假设 model 和 train_loader, test_loader 已经定义
+scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=20, verbose=True)
 
 
 # 训练和测试模型
-epochs = 20
+epochs = 60
 for epoch in range(epochs):
-    train_loss = train(model, train_loader)
-    test_loss, test_psnr = test(model, test_loader,device)
-    print(f"Epoch {epoch+1}: Train Loss = {train_loss:.4f}, Test Loss = {test_loss:.4f},Test PSNR = {test_psnr:.4f}")
+    average_loss, average_feature_loss, average_image_loss = train(model, train_loader,device)
+    test_loss, test_feature_loss, test_image_loss, test_psnr = test(model, test_loader,device)
+    print(f"Epoch {epoch+1}: Train Loss = {average_image_loss:.4f}, Test Loss = {test_image_loss:.4f},Test PSNR = {test_psnr:.4f}")
 
+    scheduler.step(test_loss)  
 
+    # 打印当前的学习率
+    current_lr = optimizer.param_groups[0]['lr']
+    print(f"Current learning rate: {current_lr}")
 
 import torch
 import matplotlib.pyplot as plt
