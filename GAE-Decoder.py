@@ -153,7 +153,7 @@ steps = 3500
 blank_steps = 500
 px = 32
 py = 32
-sim_params = [(steps, round(random.uniform(*second_element_range), 2), random.randint(*third_element_range), 10, blank_steps, px, py) for _ in range(num_random_tuples)]
+#sim_params = [(steps, round(random.uniform(*second_element_range), 2), random.randint(*third_element_range), 10, blank_steps, px, py) for _ in range(num_random_tuples)]
 
 def simulate_and_stack(sim_params):
     true_state_vect = []
@@ -205,8 +205,7 @@ def generate_graph_data(true_state_vect, radius=13):
         edge_index = torch.tensor(np.array(edge_list).T, dtype=torch.long)
         batch = torch.zeros(len(selected_indices), dtype=torch.long)
         
-        # Assuming 'image' is a part of the state or can be derived from it
-        image = torch.tensor(state, dtype=torch.float)  # Adjust this line as necessary
+        image = torch.tensor(state, dtype=torch.float)  
         
         graphs.append(Data(x=node_features, edge_index=edge_index, batch=batch, image=image))
     
@@ -218,70 +217,6 @@ import numpy as np
 import networkx as nx
 import torch
 from torch_geometric.data import Data
-
-import random
-import numpy as np
-import networkx as nx
-import torch
-from torch_geometric.data import Data
-
-def generate_graph_data(true_state_vect, radius=13, virtual_node_count=1028):
-    graphs = []
-    for state in true_state_vect:
-        # Define the indices for sensor placement and apply random movement
-        base_indices = [(i, j) for i in range(0, 63, 7) for j in range(0, 63, 7)]
-        moves = [(0, 2), (0, -2), (2, 0), (-2, 0)]
-        selected_indices = []
-
-        for (i, j) in base_indices:
-            move = random.choice(moves)
-            new_i, new_j = i + move[0], j + move[1]
-            selected_indices.append((max(0, min(new_i, 63)), max(0, min(new_j, 63))))
-
-        # Extract features for selected sensor locations
-        features = np.array([state[i, j, :] for (i, j) in selected_indices])
-
-        # Create the graph with nodes and edges
-        G = nx.Graph()
-        node_count = 0
-        real_nodes_indices = list(range(len(selected_indices)))
-        for idx, ((i, j), feature) in enumerate(zip(selected_indices, features)):
-            G.add_node(node_count, pos=(i, j), color=feature)
-            node_count += 1
-
-        virtual_node_features = []
-        virtual_edges_added = 0
-        for i in real_nodes_indices:
-            for j in real_nodes_indices:
-                if i < j and np.linalg.norm(np.array(selected_indices[i]) - np.array(selected_indices[j])) <= radius:
-                    if virtual_edges_added < virtual_node_count:
-                        mean_feature = (features[i] + features[j]) / 2
-                        G.add_node(node_count, pos=(-1, -1), color=mean_feature)  # Virtual node
-                        G.add_edge(i, node_count)
-                        G.add_edge(node_count, j)
-                        virtual_node_features.append(mean_feature)
-                        node_count += 1
-                        virtual_edges_added += 1
-                    if virtual_edges_added >= virtual_node_count:
-                        break
-            if virtual_edges_added >= virtual_node_count:
-                break
-
-        # Combine real and virtual node features
-        all_features = np.vstack([features, np.array(virtual_node_features)])
-
-        node_features = torch.tensor(all_features, dtype=torch.float)
-        edge_list = list(G.edges())
-        edge_index = torch.tensor(np.array(edge_list).T, dtype=torch.long)
-        batch = torch.zeros(node_count, dtype=torch.long)
-        
-        # Assuming 'image' is a part of the state or can be derived from it
-        image = torch.tensor(state, dtype=torch.float)  # Adjust this line as necessary
-        
-        graphs.append(Data(x=node_features, edge_index=edge_index, batch=batch, image=image))
-        print(f"Graph generated with {node_count} nodes.")
-
-    return graphs
 
 
 def generate_graph_data(true_state_vect, radius=13, virtual_node_count=256):
@@ -372,49 +307,14 @@ from torch_geometric.nn import GATConv, global_mean_pool,global_add_pool
 
 num_nodes = 256+81
 
-class GraphAutoencoder(torch.nn.Module):
-    def __init__(self, in_features=3, latent_space=32):
-        super().__init__()
-        self.in_features = in_features
-        self.latent_space = latent_space
-        
-        # Encoder layers
-        self.encoder_conv1 = GATConv(self.in_features, 32,head=2)
-        self.encoder_conv2 = GATConv(32, 64,head=2)
-        self.encoder_conv3 = GATConv(64, self.latent_space)  # Using latent_space as the final encoder output size
-        
-        # Fully connected layer to expand the latent space back to node space
-        self.fc_expand = Linear(self.latent_space, num_nodes * self.in_features)  # Expand from latent space
-        
-        # Decoder layers
-        self.decoder_conv1 = GATConv(self.in_features, 64)  # Reverse order
-        self.decoder_conv2 = GATConv(64, 32,head=2)  # Symmetric to encoder
-        self.decoder_conv3 = GATConv(32, self.in_features,head=2)  # Output should match the input feature size
 
-    def forward(self, x, edge_index, batch):
-        # Encoder pass
-        x1 = F.relu(self.encoder_conv1(x, edge_index))
-        x2 = F.relu(self.encoder_conv2(x1, edge_index))
-        x3 = F.relu(self.encoder_conv3(x2, edge_index))  # Final encoding to latent space
-        x_global = global_mean_pool(x3, batch)
-        
-        # Feature expansion
-        x_expanded = self.fc_expand(x_global)
-        x_expanded = x_expanded.view(-1, self.in_features)  # Reshape back to match input feature dimension
-        
-        # Decoder pass
-        x_reconstructed = F.relu(self.decoder_conv1(x_expanded, edge_index))
-        x_reconstructed = F.relu(self.decoder_conv2(x_reconstructed, edge_index))
-        x_reconstructed = self.decoder_conv3(x_reconstructed, edge_index)
-        x_reconstructed = custom_activation_graph(x_reconstructed)
-        
-        return x_reconstructed, x_global.view(-1, self.latent_space)
+
 class GraphAutoencoder(torch.nn.Module):
     def __init__(self, in_features=3, latent_space=32):
         super().__init__()
         self.in_features = in_features
         self.latent_space = latent_space
-        self.heads = 2
+        self.heads = 6
         
         # Encoder layers
         self.encoder_conv1 = GATConv(self.in_features, 32, heads=self.heads)
@@ -447,6 +347,10 @@ class GraphAutoencoder(torch.nn.Module):
         x_reconstructed = custom_activation_graph(x_reconstructed)
         
         return x_reconstructed, x_global.view(-1, self.latent_space)            
+
+
+
+
 
 # Example usage
 model = GraphAutoencoder(in_features=3, latent_space=64)
@@ -495,12 +399,15 @@ class CompleteModel(torch.nn.Module):
         self.image_decoder_reshape = nn.Sequential(
             nn.Conv2d(32, 8, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.Upsample(scale_factor=2, mode='nearest'),
-            nn.Conv2d(8, 16, kernel_size=3, padding=1),
+            #nn.Upsample(scale_factor=2, mode='nearest'),
+            #nn.Conv2d(8, 16, kernel_size=3, padding=1),
+            nn.ConvTranspose2d(8, 16, kernel_size=3, stride=2, padding=1, output_padding=1),
             nn.ReLU(),
-            nn.Upsample(scale_factor=2, mode='nearest'),
-            nn.Conv2d(16, 3, kernel_size=3, padding=1),
+            #nn.Upsample(scale_factor=2, mode='nearest'),
+            #nn.Conv2d(16, 3, kernel_size=3, padding=1),
             #nn.ReLU()
+            nn.ConvTranspose2d(16, 3, kernel_size=3, stride=2, padding=1, output_padding=1),
+
         )
 
     def forward(self, graph_data):
@@ -514,6 +421,11 @@ class CompleteModel(torch.nn.Module):
         image_reconstructed = custom_activation_image(image_reconstructed)
         image_reconstructed = image_reconstructed.permute(0, 2, 3, 1)  # Reshaping to fit image format
         return x_reconstructed, image_reconstructed
+
+
+from torch.nn import MultiheadAttention
+
+
 
 import torch
 import torch.nn as nn
@@ -626,46 +538,7 @@ from torchmetrics.image import PeakSignalNoiseRatio
 import torch
 import torch.nn.functional as F
 from torchmetrics.image import PeakSignalNoiseRatio
-'''
-def test(model, data_loader, device):
-    model.eval()
-    model.to(device)
-    total_loss = 0
-    total_psnr = 0
-    
-    # Initialize PSNR metric and move it to the correct device
-    
 
-    with torch.no_grad():
-        for data in data_loader:
-            data = data.to(device)
-            x_reconstructed, image_reconstructed = model(data)
-            feature_loss = F.mse_loss(x_reconstructed, data.x)
-            
-            target_shape = image_reconstructed.shape
-            data.image = data.image.view(target_shape).to(device)
-            x_reconstructed = x_reconstructed.to(device)
-            image_loss = F.mse_loss(image_reconstructed, data.image)
-
-            data_range = torch.max(image_reconstructed) - torch.min(image_reconstructed)
-            psnr_metric = PeakSignalNoiseRatio(data_range).to(device)
-            # Calculate PSNR for the reconstructed image using the metric
-            image_psnr = psnr_metric(image_reconstructed, data.image)
-            total_psnr += image_psnr.item()
-            
-            # Combine the feature loss and image loss
-            loss = feature_loss + image_loss
-            total_loss += image_loss.item()
-
-    # Compute average loss and PSNR over all batches
-    average_loss = total_loss / len(data_loader)
-    average_psnr = total_psnr / len(data_loader)
-
-    print(f"Test function returning: Average Loss = {average_loss}, Average PSNR = {average_psnr}")
-    
-    return average_loss, average_psnr
-
-'''
 def test(model, data_loader, device):
     model.eval()
     model.to(device)
@@ -720,7 +593,7 @@ scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=20, ve
 
 
 # 训练和测试模型
-epochs = 60
+epochs = 200
 for epoch in range(epochs):
     average_loss, average_feature_loss, average_image_loss = train(model, train_loader,device)
     test_loss, test_feature_loss, test_image_loss, test_psnr = test(model, test_loader,device)
